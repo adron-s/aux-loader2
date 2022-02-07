@@ -1,0 +1,5 @@
+bins/*
+objs/*
+releases/*
+loader.bin
+loader.elf
