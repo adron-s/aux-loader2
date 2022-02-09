@@ -1,4 +1,9 @@
 #!/bin/sh
+#
+# This program is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License version 2 as published
+# by the Free Software Foundation.
+#
 
 OPENWRT_DIR=/home/prog/openwrt/2021-openwrt/last-openwrt/openwrt
 
@@ -37,8 +42,8 @@ $CC $CFLAGS ../LzmaDecode.c -c
 
 #main.o must be go first !
 $LD -Ttext ${TEXT_BASE} -T ../loader.lds -Map loader.map -e _elf_start \
-	start.o main.o cpu.o fdt.o lzma.o LzmaDecode.o -o ../loader.elf
-cd ../
+	start.o main.o cpu.o fdt.o lzma.o LzmaDecode.o -o ../bins/loader.elf
+cd ../bins
 $OBJCOPY -j .text -j .rodata -O binary loader.elf loader.bin
 #$OBJCOPY -j .data -O binary loader.elf data.bin
 #$OBJCOPY -j .text -O binary loader.elf loader.bin

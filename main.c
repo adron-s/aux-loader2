@@ -2,6 +2,10 @@
  * Auxiliary OpenWRT kernel loader
  *
  * Copyright (C) 2019-2022 Serhii Serhieiev <adron@mstnt.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 as published
+ * by the Free Software Foundation.
  */
 
 #include <io.h>
@@ -24,6 +28,7 @@
 
 #define NOR_BOOT_ARG0 0xba01
 #define NET_BOOT_ARG0 0xba02
+#define ELF_BOOT_ARG0 0xba03
 
 #define SPINOR_OP_READ		0x03	/* Read data bytes (low frequency) */
 #define SPINOR_OP_RDSR		0x05	/* Read status register */
@@ -134,7 +139,7 @@ int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 		printf("not ELF\n");
 
 	printf("\n");
-	printf("OpenWRT AUX loader v%s\n",  VERSION);
+	printf("OpenWrt AUX Loader v%s\n",  VERSION);
 	printf("Copyright 2019-2022, Serhii Serhieiev <adron@mstnt.com>\n\n");
 
 	debug("Call point: 0x%x, SP: 0x%x, Start address: 0x%p\n", lr_reg, sp_reg, (void *)_start);
@@ -143,7 +148,7 @@ int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 	debug("Watchdog is set to: %d sec\n", WATCHDOG_PERIOD);
 	watchdog_setup(WATCHDOG_PERIOD);
 
-	if (arg0 < NOR_BOOT_ARG0 || arg0 > NET_BOOT_ARG0) {
+	if (arg0 < NOR_BOOT_ARG0 || arg0 > ELF_BOOT_ARG0) {
 		printf("Incorrect arg0 value: 0x%x !\n", arg0);
 		mdelay(10000);
 		reset_cpu();
@@ -159,6 +164,21 @@ int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 			 length and image type */
 		read_spi_nor(data_buf, image_header_max_size());
 		watchdog_keepalive();
+	} else if (arg0 == ELF_BOOT_ARG0) { //ELF wrapped FIT image for tftpboot
+		image_type = check_image_header(data_buf, &image_len);
+		while (1) {
+			if (image_type == ELF_IMAGE) {
+				data_buf += image_len; //our payload is FIT Image
+				image_type = check_image_header(data_buf, &image_len);
+				if (image_type == FIT_IMAGE) {
+					debug("Using ELF payload 0x%p as FIT Image\n", data_buf);
+					break;
+				} else {
+					debug("the ELF payload must be a FIT Image!\n");
+				}
+			}
+			reset_cpu();
+		}
 	}
 	image_type = check_image_header(data_buf, &image_len);
 	if (image_type == UNK_IMAGE) {
@@ -187,7 +207,7 @@ int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 		if (ret) {
 			printf("handle_fit_header() is finished. ret: -%d\n", -1 * ret);
 		} else {
-			//dump_mem(data_buf);
+			//dump_mem(data_buf, 0x100);
 			printf("Doing cleanup before start the Linux kernel\n");
 			mvpp2_cleanup();
 			cleanup_before_linux();
@@ -206,9 +226,10 @@ int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 	while (1) { };
 }
 
+/* if we started via tftpboot as ELF */
 int _elf_start(void)
 {
-	return _start(0xba01);
+	return _start(0xba03);
 }
 
 static void spi_cs_ctrl(int activate)
