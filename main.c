@@ -170,15 +170,32 @@ static void redirect_rbt_subcalls(void)
 	memcpy = (void *)my_memcpy;
 }
 
+/* if the UART is not available, this allows to
+	 at least somehow understand what is happening */
+static void blue_gpio_set_value(unsigned int out){
+	unsigned int *addr = (unsigned int *)0xf2440140;
+	unsigned int val = 0;
+	unsigned int bit = 27; //pin-27 or GPIO-91 - blue led
+	val = readl(addr);
+	if (out)
+		val |= 1 << bit;
+	else
+		val &= ~(1 << bit);
+	writel(val, addr);
+}
+
 int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 {
 	int image_len = 0, image_type, mmu_status, rbt_ver_is_ok;
 	unsigned char *data_buf = ELF_image_ptr;
 
+	watchdog_setup(5);
+
 	rbt_ver_is_ok = check_rbt_version();
 	if (rbt_ver_is_ok) {
 		mmu_status = !!mmu_is_enabled();
 	} else {
+		blue_gpio_set_value(0);
 		mmu_status = -1;
 		redirect_rbt_subcalls();
 	}

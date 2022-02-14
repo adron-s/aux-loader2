@@ -44,7 +44,7 @@ $CC $CFLAGS ../LzmaDecode.c -c
 $LD -Ttext ${TEXT_BASE} -T ../loader.lds -Map loader.map -e _elf_start \
 	start.o main.o cpu.o fdt.o lzma.o LzmaDecode.o -o ../bins/loader.elf
 cd ../bins
-$OBJCOPY -j .text -j .rodata -O binary loader.elf loader.bin
+$OBJCOPY -j .text -j .rodata -j .data -O binary loader.elf loader.bin
 #$OBJCOPY -j .data -O binary loader.elf data.bin
 #$OBJCOPY -j .text -O binary loader.elf loader.bin
 
