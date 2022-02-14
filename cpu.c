@@ -35,18 +35,69 @@ unsigned long get_tbclk(void)
 	return cntfrq;
 }
 
+static unsigned int current_el(void)
+{
+	unsigned long el;
+
+	asm volatile("mrs %0, CurrentEL" : "=r" (el) : : "cc");
+	return 3 & (el >> 2);
+}
+
+static unsigned int get_sctlr(void)
+{
+	unsigned int el;
+	unsigned long val;
+
+	el = current_el();
+	if (el == 1)
+		asm volatile("mrs %0, sctlr_el1" : "=r" (val) : : "cc");
+	else if (el == 2)
+		asm volatile("mrs %0, sctlr_el2" : "=r" (val) : : "cc");
+	else
+		asm volatile("mrs %0, sctlr_el3" : "=r" (val) : : "cc");
+
+	return val;
+}
+
+static void set_sctlr(unsigned long val)
+{
+	unsigned int el;
+
+	el = current_el();
+	if (el == 1)
+		asm volatile("msr sctlr_el1, %0" : : "r" (val) : "cc");
+	else if (el == 2)
+		asm volatile("msr sctlr_el2, %0" : : "r" (val) : "cc");
+	else
+		asm volatile("msr sctlr_el3, %0" : : "r" (val) : "cc");
+
+	asm volatile("isb");
+}
+
 unsigned int mmu_is_enabled(void)
 {
 	return get_sctlr() & CR_M;
 }
 
-void enable_caches(void)
+void enable_caches(int what)
 {
 	uint32_t sctlr;
 	sctlr = get_sctlr();
-	/* since RouterBoot has already configured all the caches, but now they
-		 are turned off - we just turn them on here, and nothing more */
-	set_sctlr(sctlr | (CR_C|CR_M|CR_I));
+	if (what == 2) {
+		/* since RouterBoot has already configure all the caches, but now its
+			 are turned off - we just turn them on here, and nothing more */
+		set_sctlr(sctlr | (CR_C|CR_M|CR_I));
+	} else if (what == 1) {
+		/* enable only ICache and without RouterBOOT help!
+			 the DСache code is very complex and large.
+			 so I won't bring it here. */
+		set_sctlr(sctlr | CR_I);
+	}
+}
+
+void icache_disable(void)
+{
+	set_sctlr(get_sctlr() & ~CR_I);
 }
 
 /*
@@ -114,4 +165,10 @@ void watchdog_setup(int period)
 void watchdog_keepalive(void)
 {
 	writel(0, SBSA_GWDT_RF_BASE + SBSA_GWDT_WRR);
+}
+
+void native_reset_cpu(void)
+{
+	watchdog_setup(1);
+	while (1);
 }

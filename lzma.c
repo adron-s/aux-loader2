@@ -12,7 +12,6 @@
  * by the Free Software Foundation.
  */
 
-#include <routerboot.h>
 #include <types.h>
 #include <LzmaDecode.h>
 
@@ -24,6 +23,9 @@ static unsigned char *lzma_data;
 static unsigned long lzma_datasize;
 static unsigned long lzma_outsize;
 static unsigned long kernel_la;
+
+typedef int printf_fn(const char *, ...);
+static printf_fn *printf;
 
 static void lzma_init_data(void *_kernel_la, void *_lzma_data, u32 _lzma_datasize)
 {
@@ -93,12 +95,14 @@ static int lzma_decompress(unsigned char *outStream)
 	}
 	return ret;
 }
-void lzma_setup_workspace(void *_workspace)
+void lzma_setup_workspace(void *_workspace, void *_printf)
 {
 	workspace = _workspace;
+	printf = _printf;
 }
 
-int lzma_gogogo(void *_kernel_la, void *_lzma_data, u32 _lzma_datasize, u32 *lzma_outsize_ret, void *_workspace)
+int lzma_gogogo(void *_kernel_la, void *_lzma_data, u32 _lzma_datasize,
+u32 *lzma_outsize_ret, void *_workspace)
 {
 	int res;
 	lzma_init_data(_kernel_la, _lzma_data, _lzma_datasize);

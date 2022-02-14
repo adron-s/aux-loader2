@@ -22,7 +22,7 @@
 #define debug(...)
 #endif /* DEBUG */
 
-#define VERSION "2.00"
+#define VERSION "2.01"
 
 #define WATCHDOG_PERIOD 60 /* sec */
 
@@ -47,22 +47,33 @@ enum image_types {
 int _start(unsigned int);
 static void spi_cs_ctrl(int);
 unsigned long int ntohl(unsigned long int);
-void lzma_setup_workspace(void *);
+void lzma_setup_workspace(void *, void *);
 int lzma_gogogo(void *, void *, u32, u32 *);
 int fdt_check_header(void *, u32);
 char *fdt_get_prop(void *, char *, char *, u32 *);
 int handle_fit_header(void *, u32);
 void mvpp2_cleanup(void);
 void cleanup_before_linux(void);
-void enable_caches(void);
+void enable_caches(int);
+void icache_disable(void);
 unsigned int mmu_is_enabled(void);
 void watchdog_setup(int);
 void watchdog_keepalive(void);
+void native_reset_cpu(void);
 
 void (*kernel_entry)(void *fdt_addr, void *res0,
 	void *res1, void *res2);
 void *kernel_p0;
 void *dtb_mem;
+
+void my_memcpy(void *dst, const void *src, unsigned long n)
+{
+	const void *end = src + n;
+	for(; src + 4 <= end; src += 4, dst += 4)
+		*((u32*)dst) = *((u32*)src);
+	for(; src < end; src++, dst++)
+		*((u8*)dst) = *((u8*)src);
+}
 
 #ifdef DEBUG
 static inline void dump_mem(unsigned char *data, unsigned int size) {
@@ -129,12 +140,48 @@ static int check_image_header(void *buf, int *_len)
 	return image_type;
 }
 
+static int check_rbt_version(void)
+{
+	const char *p = rbt_version_must_be_offset;
+	const char *q = rbt_version_must_be_string;
+	while (1) {
+		if (*p != *q)
+			return 0;
+		if (*q == '\0')
+			return 1;
+		p++; q++;
+	}
+	return 1;
+}
+
+static int stub_for_rbt_calls(int a, int b, int c, int d)
+{
+	return 0;
+}
+
+/* the RouterBOOT version does not match with known to us =>
+	 the offsets of its functions may be different, so we
+	 cannot use the RouterBOOT functions at all !!! */
+static void redirect_rbt_subcalls(void)
+{
+	printf = (void *)stub_for_rbt_calls;
+	mdelay = (void *)stub_for_rbt_calls;
+	reset_cpu = (void *)native_reset_cpu;
+	memcpy = (void *)my_memcpy;
+}
+
 int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 {
-	int image_len = 0, image_type;
+	int image_len = 0, image_type, mmu_status, rbt_ver_is_ok;
 	unsigned char *data_buf = ELF_image_ptr;
-	int mmu_status = mmu_is_enabled();
 
+	rbt_ver_is_ok = check_rbt_version();
+	if (rbt_ver_is_ok) {
+		mmu_status = !!mmu_is_enabled();
+	} else {
+		mmu_status = -1;
+		redirect_rbt_subcalls();
+	}
 	if (arg0 == NET_BOOT_ARG0)
 		printf("not ELF\n");
 
@@ -147,7 +194,9 @@ int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 
 	debug("Watchdog is set to: %d sec\n", WATCHDOG_PERIOD);
 	watchdog_setup(WATCHDOG_PERIOD);
-
+	if (!rbt_ver_is_ok) {
+		debug("rbt_ver_is_ok: FALSE !\n");
+	}
 	if (arg0 < NOR_BOOT_ARG0 || arg0 > ELF_BOOT_ARG0) {
 		printf("Incorrect arg0 value: 0x%x !\n", arg0);
 		mdelay(10000);
@@ -155,8 +204,10 @@ int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 	}
 
 	debug("MMU status: 0x%x\n", mmu_status);
-	if (!mmu_status)
-		enable_caches(); /* Enable I and D caches (for LZMA ops speed up) */
+	if (mmu_status == 0)
+		enable_caches(2); /* Enable I and D caches (for LZMA ops speed up) */
+	else if (mmu_status == -1)
+		enable_caches(1); /* Enable only ICache ! */
 
 	if (arg0 == NOR_BOOT_ARG0) { //NOR boot
 		watchdog_keepalive();
@@ -209,8 +260,12 @@ int _main(u32 arg0, u32 lr_reg, u32 sp_reg)
 		} else {
 			//dump_mem(data_buf, 0x100);
 			printf("Doing cleanup before start the Linux kernel\n");
-			mvpp2_cleanup();
-			cleanup_before_linux();
+			if (rbt_ver_is_ok) {
+				mvpp2_cleanup();
+				cleanup_before_linux();
+			} else {
+				icache_disable();
+			}
 			watchdog_keepalive();
 			printf("Starting kernel at 0x%p, dtb(arg0): 0x%p\n", kernel_entry, kernel_p0);
 			__asm__ __volatile__("": : :"memory");
@@ -314,7 +369,7 @@ int handle_fit_header(void *_kernel_data_start, u32 kern_image_len)
 	printf("\n");
 	watchdog_keepalive();
 	printf("Extracting LZMA kernel...");
-	lzma_setup_workspace(LZMA_workspace_ptr);
+	lzma_setup_workspace(LZMA_workspace_ptr, printf);
 	ret = lzma_gogogo(dst, src, kernel_body_len, &kernel_uncompr_size);
 	if (ret)
 		return ret;
